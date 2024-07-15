@@ -110,12 +110,19 @@ provide a more real representation of a web session flow:
 - `Checkout` (depends on `AddToCart` event)
 - `Login`
 - `Logout` (depends on `Login` event)
-- `CheckoutAsGuest`
-- `CompleteOrder` (depends on **any** of `Checkout` or `CheckoutAsGuest` events)
-- `CheckOrderStatus` (depends on `Login` event)
+- ~~`CheckoutAsGuest`~~
+- `CompleteOrder` (depends on **any** of `Checkout` or ~~`CheckoutAsGuest`~~ events) 
+- ~~`CheckOrderStatus` (depends on `Login` event)~~
 
 Moreover, the `Search`, `AddToCart`, `IncreaseQuantity` `DeleteFromCart` & `CheckOrderStatus` include a metadata field
 with additional information about the products and the user queries.
+
+## Changes after fork
+- Removed 2 events
+- Implemented `AddPromoCode` event
+- Added metadata for `Checkout` event
+- Added product id from `mobile_phones.py` instead of random
+- Fixed some bugs
 
 ## Contributing
 

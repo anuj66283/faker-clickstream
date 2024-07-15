@@ -8,9 +8,7 @@ events = [
     "Checkout",
     "Login",
     "Logout",
-    "CheckoutAsGuest"
     "CompleteOrder",
-    "CheckOrderStatus"
 ]
 
 weighted_events = [
@@ -69,21 +67,9 @@ weighted_events = [
         "dependencyFilter": "any"
     },
     {
-        "name": "CheckoutAsGuest",
-        "popularity": 40,
-        "dependsOn": [],
-        "dependencyFilter": "any"
-    },
-    {
         "name": "CompleteOrder",
         "popularity": 65,
         "dependsOn": ["Checkout", "CheckoutAsGuest"],
-        "dependencyFilter": "any"
-    },
-    {
-        "name": "CheckOrderStatus",
-        "popularity": 70,
-        "dependsOn": ["Login"],
         "dependencyFilter": "any"
     }
 ]

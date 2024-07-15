@@ -58,7 +58,7 @@ class ClickstreamProvider(BaseProvider):
 
         # Initialize static session values
         session_events = []
-        user_id = _get_user_id()
+        user_id = 0
         user_agent = self.user_agent()
         session_id = _get_session_id()
         ip = _get_ip()
@@ -69,6 +69,7 @@ class ClickstreamProvider(BaseProvider):
         # Keep track of unique values in a session
         unique_session_events = set()
         product_codes = set()
+        product_quantities = {}
 
         for s in range(random_session_size):
             # Mock time delay between events
@@ -78,20 +79,21 @@ class ClickstreamProvider(BaseProvider):
             # Fetch weighted event
             event = self.weighted_event()
 
-            if (event['name'] == 'Login' and event['name'] in unique_session_events) \
-                    or (event['name'] == 'CheckoutAsGuest' and user_id != 0):
-                # If user ID is not 0, discard CheckoutAsGuest event
-                # or Login exists in session, discard Login event
-                # Add a mock Search event
-                event['name'] = 'Search'
-
-            if event['name'] == 'Login' and user_id == 0:
-                # If user id is -1 and Login event, regenerate user ID.
-                user_id = _get_user_id(start=1)
-
             if (event['name'] == 'Login' and user_id != 0) or (event['name'] == 'Logout' and user_id == 0):
-                # Add a mock Search event
-                event['name'] = 'Search'
+                """
+                If Logged in user makes login event or logged out user makes logout event
+                change event to some random event
+                """
+                event['name'] = choice(['Logout', 'Checkout', 'Login', 'DecreaseQuantity', 'DeleteFromCart'])
+
+            metadata = {}
+
+            if event['name'] == 'Login':
+                if user_id == 0:
+                    metadata['status'] = "Complete"
+                    user_id = _get_user_id(start=1)
+                elif user_id != 0 and 'Logout' not in unique_session_events:
+                    event['name'] = choice(['Logout', 'Checkout', 'IncreaseQuantity', 'DecreaseQuantity', 'DeleteFromCart'])
 
             # Keep track of unique events in session
             unique_session_events.add(event['name'])
@@ -99,44 +101,106 @@ class ClickstreamProvider(BaseProvider):
             # Handle event dependencies
             if len(event['dependsOn']):
                 list_check = [d in unique_session_events for d in event['dependsOn']]
+                
                 if event['dependencyFilter'] == 'all':
                     f = all(list_check)
                 else:
                     f = any(list_check)
                 if not f:
-                    # Add a mock Search event
-                    event['name'] = 'Search'
+                    event['name'] = choice(['AddToCart', 'Checkout', 'IncreaseQuantity', 'DecreaseQuantity', 'DeleteFromCart'])
 
-            # If CompleteOrder, remove some events from the unique list to reoccur.
-            if event['name'] == 'CompleteOrder':
-                if 'Checkout' in unique_session_events:
-                    unique_session_events.remove('Checkout')
-                if 'CheckoutAsGuest' in unique_session_events:
-                    unique_session_events.remove('CheckoutAsGuest')
-                if 'DecreaseQuantity' in unique_session_events:
-                    unique_session_events.remove('DecreaseQuantity')
-
-            # Fill metadata object conditionally
-            metadata = {}
             if event['name'] == 'Search':
                 sample_product = _get_weighted_mobile_phone()
+
                 metadata['query'] = choice(
                     (sample_product['model_name'], sample_product['brand_name'], sample_product['os'])
                 )
 
-            if event['name'] in ('AddToCart', 'IncreaseQuantity'):
-                metadata['product_id'] = _get_product_code()
-                metadata['quantity'] = _get_quantity()
-                product_codes.add(metadata['product_id'])
+            elif event['name'] == 'AddToCart':
+                product_id = _get_product_code()
+                quantity = _get_quantity()
+                metadata['product_id'] = product_id
+                metadata['quantity'] = quantity
+                product_codes.add(product_id)
+                if product_id in product_quantities:
+                    product_quantities[product_id] += quantity
+                else:
+                    product_quantities[product_id] = quantity
 
-            if event['name'] == 'DeleteFromCart':
+            elif event['name'] == 'IncreaseQuantity':
+                if len(product_codes):
+                    product_id = choice(list(product_codes))
+                    quantity = _get_quantity()
+                    metadata['product_id'] = product_id
+                    metadata['quantity'] = quantity
+                else:
+                    continue
+               
+            elif event['name'] == 'DeleteFromCart':
                 if len(product_codes):
                     random_delete = choice(list(product_codes))
                     product_codes.remove(random_delete)
                     metadata['product_id'] = random_delete
+                    del product_quantities[random_delete]
 
-            if event['name'] == 'CheckOrderStatus':
-                metadata['order_id'] = _get_order_id()
+                    if not len(product_codes):
+                        unique_session_events.discard("AddToCart")
+                        unique_session_events.discard("IncreaseQuantity")
+                else:
+                    continue
+
+            elif event['name'] == 'DecreaseQuantity':
+                if len(product_codes):
+                    random_decrease = choice(list(product_codes))
+                    current_quantity = product_quantities[random_decrease]
+                    decrease_quantity = randint(1, current_quantity)
+                    metadata['product_id'] = random_decrease
+                    metadata['quantity'] = decrease_quantity
+                    product_quantities[random_decrease] -= decrease_quantity
+                    if product_quantities[random_decrease] <= 0:
+                        product_codes.remove(random_decrease)
+                        del product_quantities[random_decrease]
+
+                        if not len(product_codes):
+                            unique_session_events.discard("AddToCart")
+                            unique_session_events.discard("IncreaseQuantity")
+                else:
+                    continue
+
+            elif event['name'] == 'AddPromoCode':
+                if 'AddPromoCode' in unique_session_events:
+                    continue
+
+                metadata['promo_code'] = _generate_promo_code()
+                unique_session_events.add('AddPromoCode')
+
+            elif event['name'] == 'Checkout':
+                if len(product_codes):
+                    cart_items = list(product_codes)
+                    metadata['cart_items'] = cart_items
+                    metadata['total_amount'] = sum(_get_mobile_phone_price(product_id) for product_id in cart_items)
+                    product_codes = set()
+                    unique_session_events.discard('AddPromoCode')
+                else:
+                    continue
+
+            elif event['name'] == 'CompleteOrder':
+                if 'Checkout' in unique_session_events:
+                    metadata['status'] = "Complete"
+                    unique_session_events.add('CompleteOrder')
+                    unique_session_events.discard('Checkout')
+                    unique_session_events.discard('DecreaseQuantity')
+                else:
+                    continue
+
+            elif event['name'] == 'Logout':
+                if user_id != 0:
+                    user_id = 0
+                    metadata['status'] = "Complete"
+                    unique_session_events.add('Logout')
+                    unique_session_events.remove('Login')
+                else:
+                    continue
 
             # Construct final event object
             r = {
@@ -170,21 +234,11 @@ def _get_session_id():
 
 def _get_product_code():
     """
-    Generate random product code from range 1 to 999999.
+    Get product_id from the mobile_phone
 
-    :return: Random integer number
+    :return : integer
     """
-    return randint(1, 999999)
-
-
-def _get_order_id():
-    """
-    Generate random order id from range 1 to 999999.
-
-    :return: Random integer number
-    """
-    return randint(1, 999999)
-
+    return choice(mobile_phones)['id']
 
 def _get_user_id(start: int = 0, end: int = 999999):
     """
@@ -252,3 +306,17 @@ def _get_channel():
     :return: Origin channel string
     """
     return choice(channel)
+
+def _generate_promo_code():
+    """
+    Generate a random promo code
+
+    :return: Random string
+    """
+    return ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+
+def _get_mobile_phone_price(product_id):
+    for phone in mobile_phones:
+        if phone['id'] == product_id:
+            return phone['best_price']
+    return 0
